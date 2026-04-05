@@ -138,7 +138,7 @@ class UbidotsService {
   }) async {
     final fanShouldOn    = raw.temperature > 35.0 || raw.humidite > 90.0;
     final heaterShouldOn = raw.temperature < 5.0;
-    final pumpShouldOn   = raw.niveauEau   < 20.0;
+    final pumpShouldOn   = raw.niveauEau   > 80.0;
     final alerteChaud    = raw.temperature > 35.0;
     final alerteNiveau   = raw.niveauEau   < 20.0;
 

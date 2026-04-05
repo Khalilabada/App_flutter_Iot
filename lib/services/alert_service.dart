@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/sensor_data.dart';
 
@@ -8,49 +9,54 @@ class AlertService {
   static const _kWater    = 'alert_water';
   static const _kMouv     = 'alert_mouvement';
 
-  // Seuils correspondant à la logique ESP32-DEV
   static const double tempHotThreshold  = 35.0;
-  static const double tempColdThreshold = 15.0;
-  static const double humidThreshold    = 80.0;
-  static const double waterThreshold    = 20.0;
+  static const double tempColdThreshold = 5.0;
+  static const double humidThreshold    = 90.0;
+  static const double waterThreshold    = 80.0;
 
   static final List<AlertMessage> _history = [];
   static List<AlertMessage> get history => List.unmodifiable(_history);
 
-  // ── Vérification ESP32-DEV ───────────────────────────────────
+  static final StreamController<AlertMessage> _streamCtrl =
+      StreamController<AlertMessage>.broadcast();
+  static Stream<AlertMessage> get alertStream => _streamCtrl.stream;
+
   static Future<void> checkDev(DevData data) async {
     final prefs = await SharedPreferences.getInstance();
-
-    await _handle(prefs: prefs, key: _kTempHot,
+    await _handle(
+      prefs: prefs, key: _kTempHot,
       triggered: data.temperature > tempHotThreshold,
       type: 'temp_hot', device: 'dev',
       message:  '🌡️ Temp. élevée : ${data.temperature.toStringAsFixed(1)}°C → Ventilateur activé',
       resolved: '✅ Température normale — Ventilateur coupé',
     );
-    await _handle(prefs: prefs, key: _kTempCold,
+    await _handle(
+      prefs: prefs, key: _kTempCold,
       triggered: data.temperature < tempColdThreshold,
       type: 'temp_cold', device: 'dev',
       message:  '🥶 Temp. froide : ${data.temperature.toStringAsFixed(1)}°C → Chauffage activé',
       resolved: '✅ Température normale — Chauffage coupé',
     );
-    await _handle(prefs: prefs, key: _kHumid,
+    await _handle(
+      prefs: prefs, key: _kHumid,
       triggered: data.humidite > humidThreshold,
       type: 'humidity', device: 'dev',
       message:  '💧 Humidité élevée : ${data.humidite.toStringAsFixed(0)}% → Vérifier ventilation',
       resolved: '✅ Humidité revenue à la normale',
     );
-    await _handle(prefs: prefs, key: _kWater,
-      triggered: data.niveauEau < waterThreshold,
+    await _handle(
+      prefs: prefs, key: _kWater,
+      triggered: data.niveauEau > waterThreshold,
       type: 'water', device: 'dev',
-      message:  '🪣 Réservoir bas : ${data.niveauEau.toStringAsFixed(0)}% → Pompe activée',
-      resolved: '✅ Réservoir rechargé — Pompe coupée',
+      message:  '🪣 Réservoir diminue : ${data.niveauEau.toStringAsFixed(0)}% → Pompe activée',
+      resolved: '✅ Niveau eau normal — Pompe coupée',
     );
   }
 
-  // ── Vérification ESP32-CAM ───────────────────────────────────
   static Future<void> checkCam(CamData data) async {
     final prefs = await SharedPreferences.getInstance();
-    await _handle(prefs: prefs, key: _kMouv,
+    await _handle(
+      prefs: prefs, key: _kMouv,
       triggered: data.mouvement,
       type: 'mouvement', device: 'cam',
       message:  '🚨 Mouvement détecté — Alarme activée',
@@ -69,11 +75,25 @@ class AlertService {
   }) async {
     final already = prefs.getBool(key) ?? false;
     if (triggered && !already) {
-      _add(AlertMessage(message: message, timestamp: DateTime.now(), type: type, device: device));
+      final msg = AlertMessage(
+        message: message,
+        timestamp: DateTime.now(),
+        type: type,
+        device: device,
+      );
+      _add(msg);
+      _streamCtrl.add(msg);
       await prefs.setBool(key, true);
     } else if (!triggered && already) {
       await prefs.setBool(key, false);
-      _add(AlertMessage(message: resolved, timestamp: DateTime.now(), type: '${type}_resolved', device: device));
+      final msg = AlertMessage(
+        message: resolved,
+        timestamp: DateTime.now(),
+        type: '${type}_resolved',
+        device: device,
+      );
+      _add(msg);
+      _streamCtrl.add(msg);
     }
   }
 
@@ -95,4 +115,6 @@ class AlertService {
       _history.where((a) => a.device == 'dev').toList();
   static List<AlertMessage> get camAlerts =>
       _history.where((a) => a.device == 'cam').toList();
+
+  static void dispose() => _streamCtrl.close();
 }
